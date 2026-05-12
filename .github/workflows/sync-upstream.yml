@@ -1,0 +1,47 @@
+name: Merge upstream netbird/main into rootful-proxy
+
+on:
+  schedule:
+    - cron: '15 8 * * *'
+  workflow_dispatch:
+
+# GitHub runs schedule only from the default branch workflow file copy. Keep an identical workflow
+# on `main`, or temporarily set `rootful-proxy` as default, if you rely on unattended daily sync.
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout rootful-proxy
+        uses: actions/checkout@v4
+        with:
+          ref: rootful-proxy
+          fetch-depth: 0
+
+      - name: Merge upstream main
+        run: |
+          set -eux
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          UPSTREAM_REPO="${{ vars.UPSTREAM_REPO }}"
+          if [ -z "${UPSTREAM_REPO}" ]; then
+            UPSTREAM_REPO="netbirdio/netbird"
+          fi
+          UPSTREAM_REPO="${UPSTREAM_REPO#https://github.com/}"
+          UPSTREAM_REPO="${UPSTREAM_REPO%.git}"
+
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream main
+          git merge --no-edit FETCH_HEAD || {
+            echo "Merge conflict; resolve on rootful-proxy branch manually." >&2
+            exit 1
+          }
+
+      - name: Push fork rootful-proxy
+        run: |
+          git push origin "HEAD:rootful-proxy"

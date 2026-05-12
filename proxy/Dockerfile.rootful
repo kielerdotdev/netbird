@@ -1,0 +1,58 @@
+# Rootful Alpine image for reverse-proxy: nftables/iptables/iproute/wg-tools and root.
+# Upstream distroless proxy: proxy/Dockerfile (expects pre-built netbird-proxy from Goreleaser).
+# Build matches proxy/Dockerfile.multistage paths; ldflags aligned with .goreleaser.yaml (netbird-proxy).
+#
+# Note: golang image tracks go.mod / upstream proxy Dockerfiles (currently Go 1.25.x), not older templates.
+
+FROM golang:1.25-alpine AS builder
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY client ./client
+COPY dns ./dns
+COPY encryption ./encryption
+COPY flow ./flow
+COPY formatter ./formatter
+COPY monotime ./monotime
+COPY proxy ./proxy
+COPY route ./route
+COPY shared ./shared
+COPY sharedsock ./sharedsock
+COPY upload-server ./upload-server
+COPY util ./util
+COPY version ./version
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
+    -o /tmp/netbird-proxy \
+    ./proxy/cmd/proxy
+
+FROM alpine:3.20 AS runtime
+
+RUN apk add --no-cache \
+        ca-certificates \
+        iptables \
+        iproute2 \
+        nftables \
+        tzdata \
+        wireguard-tools
+
+RUN mkdir -p /go/bin \
+    && mkdir -p /var/lib/netbird \
+    && mkdir -p /certs \
+    && chmod 755 /certs
+
+COPY --from=builder /tmp/netbird-proxy /go/bin/netbird-proxy
+
+ENV HOME=/var/lib/netbird
+ENV NB_PROXY_ADDRESS=":8443"
+EXPOSE 8443
+VOLUME ["/certs", "/var/lib/netbird"]
+
+ENTRYPOINT ["/go/bin/netbird-proxy"]
